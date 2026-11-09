@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -80,7 +81,7 @@ type stubCollector struct {
 	after   []metric
 }
 
-func (s stubCollector) update(ch chan<- metric, _ []string, _ regexpCollection) error {
+func (s stubCollector) update(ch chan<- metric, _ []string, _ filters) error {
 	for _, m := range s.before {
 		ch <- m
 	}
@@ -474,5 +475,54 @@ func TestZFSCollectDeadlineTie(t *testing.T) {
 				t.Errorf("cache holds %v, want %v", values, want)
 			}
 		})
+	}
+}
+
+func TestNormalizeDescendants(t *testing.T) {
+	testCases := []struct {
+		name    string
+		paths   []string
+		want    []string
+		wantErr bool
+	}{
+		{name: `none`, want: []string{}},
+		{name: `sorted`, paths: []string{`tank/b`, `rpool/a`}, want: []string{`rpool/a`, `tank/b`}},
+		{name: `duplicates`, paths: []string{`rpool/a`, `rpool/a`}, want: []string{`rpool/a`}},
+		{name: `shallower path wins`, paths: []string{`rpool/a/b`, `rpool/a`, `rpool/a/b/c`}, want: []string{`rpool/a`}},
+		{name: `shared prefix is not nesting`, paths: []string{`rpool/a`, `rpool/ab`}, want: []string{`rpool/a`, `rpool/ab`}},
+		{name: `pool`, paths: []string{`rpool`, `rpool/a`, `rpool2/a`}, want: []string{`rpool`, `rpool2/a`}},
+		{name: `empty`, paths: []string{``}, wantErr: true},
+		{name: `snapshot`, paths: []string{`rpool/a@snap`}, wantErr: true},
+		{name: `bookmark`, paths: []string{`rpool/a#mark`}, wantErr: true},
+		{name: `trailing slash`, paths: []string{`rpool/a/`}, wantErr: true},
+		{name: `leading slash`, paths: []string{`/rpool/a`}, wantErr: true},
+		{name: `double slash`, paths: []string{`rpool//a`}, wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := normalizeDescendants(tc.paths)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeDescendants(%q) = %q, want an error", tc.paths, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("normalizeDescendants(%q) = %q, want %q", tc.paths, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestNewZFSRejectsInvalidDescendants(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	config := defaultConfig(mock_zfs.NewMockClient(ctrl))
+	config.ExcludeDescendants = []string{`rpool/docker/`}
+	if _, err := NewZFS(config); err == nil {
+		t.Fatal("NewZFS() succeeded, want an error")
 	}
 }
