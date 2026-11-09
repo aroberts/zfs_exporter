@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"regexp"
 	"sort"
@@ -84,16 +85,10 @@ func (c *ZFS) Collect(ch chan<- prometheus.Metric) {
 	// Synchronize on collector completion.
 	wg := sync.WaitGroup{}
 	wg.Add(len(c.Collectors))
-	// Synchonize after timeout event, ensuring no writers are still active when we return control.
+	// Closed upon exceeding the deadline, after which nothing more is written to ch.
 	timeout := make(chan struct{})
-	finalized := make(chan struct{})
-	finalize := func() {
-		select {
-		case <-finalized:
-		default:
-			close(finalized)
-		}
-	}
+	// Held while writing to ch, so that closing timeout under it guarantees no write is in flight.
+	var sendMu sync.Mutex
 
 	// Close the proxy channel upon collector completion.
 	go func() {
@@ -105,12 +100,13 @@ func (c *ZFS) Collect(ch chan<- prometheus.Metric) {
 	go func() {
 		for metric := range proxy {
 			cache.add(metric)
+			sendMu.Lock()
 			select {
 			case <-timeout:
-				finalize()
 			default:
 				ch <- metric.prometheus
 			}
+			sendMu.Unlock()
 		}
 		// Signal completion and update full cache.
 		c.cache.replace(cache)
@@ -145,20 +141,20 @@ func (c *ZFS) Collect(ch chan<- prometheus.Metric) {
 		}(name, collector)
 	}
 
-	// Wait for completion or timeout
+	// Wait for completion or timeout. Completion cancels ctx only after the
+	// last write to ch.
 	<-ctx.Done()
-	err := ctx.Err()
-	if err == context.Canceled {
-		finalize()
-	} else if err != nil {
-		// Upon exceeding deadline, send cached data for any metrics that have not already been reported.
-		close(timeout) // assert timeout for flow control in other goroutines
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		// Stop writes to ch from the collection, which continues in the
+		// background, then send cached data for any metrics that have not
+		// already been reported.
+		sendMu.Lock()
+		close(timeout)
+		sendMu.Unlock()
 		c.cache.merge(cache)
 		cacheIndex := cache.index()
 		c.sendCached(ch, cacheIndex)
 	}
-	// Ensure there are no in-flight writes to the upstream channel
-	<-finalized
 }
 
 // sendCached values that do not appear in the current cacheIndex.
