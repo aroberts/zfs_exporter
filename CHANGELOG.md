@@ -1,3 +1,26 @@
+## [2.7.0](https://github.com/aroberts/zfs_exporter/compare/v2.6.0...v2.7.0) (2026-11-15)
+
+
+### Features
+
+* **collector:** add --exclude-descendants to skip dataset subtrees ([3af3032](https://github.com/aroberts/zfs_exporter/commit/3af3032871c4c9daff218b7a45f82d36023d1d74))
+
+
+### Bug Fixes
+
+* **collector:** Return from Collect at the deadline ([5006c06](https://github.com/aroberts/zfs_exporter/commit/5006c0672f60180c4acbb0cdac1a5a1b953f6512)), closes [#79](https://github.com/aroberts/zfs_exporter/issues/79) [#38](https://github.com/aroberts/zfs_exporter/issues/38) [#77](https://github.com/aroberts/zfs_exporter/issues/77)
+
+
+### Documentation
+
+* clarify that --exclude filters after collection ([0ea5439](https://github.com/aroberts/zfs_exporter/commit/0ea54390523b30a5add2dae5796f8811cf485eca))
+
+
+### Code Refactoring
+
+* **zfs:** accept explicit targets in execute ([65a9697](https://github.com/aroberts/zfs_exporter/commit/65a9697d08f685c907d14ef6eab226fd2dd89764))
+
+
 ### [2.5.2](https://github.com/pdf/zfs_exporter/compare/v2.5.1...v2.5.2) (2026-11-15)
 
 
